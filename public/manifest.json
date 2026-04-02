@@ -1,0 +1,15 @@
+{
+  "name": "Sabay — Metro Manila Carpool",
+  "short_name": "Sabay",
+  "description": "Carpool across Metro Manila. Share fuel. Beat traffic.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f9fafb",
+  "theme_color": "#059669",
+  "icons": [
+    { "src": "/icon", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["travel", "transportation"],
+  "lang": "en-PH"
+}
