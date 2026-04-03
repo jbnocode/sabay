@@ -21,6 +21,8 @@ interface Props {
   bias?: { lng: number; lat: number }
   disabled?: boolean
   className?: string
+  /** Visually hide label but keep it for screen readers (e.g. grouped field layout). */
+  hideLabel?: boolean
 }
 
 export default function PlaceAutocomplete({
@@ -32,6 +34,7 @@ export default function PlaceAutocomplete({
   bias,
   disabled,
   className,
+  hideLabel,
 }: Props) {
   const id = useId()
   const listId = `${id}-list`
@@ -141,7 +144,10 @@ export default function PlaceAutocomplete({
 
   return (
     <div ref={wrapRef} className={cn('relative flex flex-col gap-1', className)}>
-      <label htmlFor={id} className="text-sm font-medium text-gray-700">
+      <label
+        htmlFor={id}
+        className={hideLabel ? 'sr-only' : 'text-sm font-medium text-gray-700'}
+      >
         {label}
       </label>
       <input

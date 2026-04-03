@@ -9,5 +9,5 @@ export async function GET(request: Request) {
     const supabase = await createClient()
     await supabase.auth.exchangeCodeForSession(code)
   }
-  return NextResponse.redirect(`${origin}/find-ride`)
+  return NextResponse.redirect(`${origin}/`)
 }

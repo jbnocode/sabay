@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { LatLng } from '@/lib/matching/geometry'
 
 /**
- * Amazon Location Service Route Calculator — REST endpoint with API Key auth.
+ * Amazon Location Service Routes V2 — REST endpoint with API Key auth.
  *
  * Endpoint pattern:
- *   POST https://routes.geo.{region}.amazonaws.com/routes/v0/calculators/{calcName}/calculate/route?key={apiKey}
+ *   POST https://routes.geo.{region}.amazonaws.com/v2/routes?key={apiKey}
  *
  * This avoids AWS SDK credential middleware complexity; API Key is a first-class
  * auth method for Amazon Location and is appended as a query param.
@@ -14,28 +14,27 @@ export async function POST(req: NextRequest) {
   const { origin, destination }: { origin: LatLng; destination: LatLng } = await req.json()
 
   const region = process.env.NEXT_PUBLIC_AWS_REGION?.trim()
-  const calcName = process.env.NEXT_PUBLIC_AWS_LOCATION_CALCULATOR_NAME
   const apiKey = process.env.NEXT_PUBLIC_AWS_LOCATION_API_KEY
 
-  if (!region || !calcName || !apiKey) {
+  if (!region || !apiKey) {
     return NextResponse.json(
       {
         error:
-          'Amazon Location not configured: set NEXT_PUBLIC_AWS_REGION (must match your API key region, e.g. ap-southeast-2), calculator name, and API key',
+          'Amazon Location not configured: set NEXT_PUBLIC_AWS_REGION (must match your API key region) and API key',
       },
       { status: 500 }
     )
   }
 
   const url =
-    `https://routes.geo.${region}.amazonaws.com/routes/v0/calculators/${calcName}/calculate/route` +
+    `https://routes.geo.${region}.amazonaws.com/v2/routes` +
     `?key=${encodeURIComponent(apiKey)}`
 
   const body = {
-    DeparturePosition: [origin.lng, origin.lat],
-    DestinationPosition: [destination.lng, destination.lat],
+    Origin: [origin.lng, origin.lat],
+    Destination: [destination.lng, destination.lat],
     TravelMode: 'Car',
-    IncludeLegGeometry: true,
+    LegGeometryFormat: 'Simple',
   }
 
   try {
@@ -51,12 +50,17 @@ export async function POST(req: NextRequest) {
     }
 
     const data: {
-      Legs?: { Geometry?: { LineString?: [number, number][] } }[]
-      Summary?: { Distance?: number; DurationSeconds?: number }
+      Routes?: Array<{
+        Legs?: Array<{
+          Geometry?: { LineString?: [number, number][]; Polyline?: string }
+        }>
+        Summary?: { Distance?: number; Duration?: number }
+      }>
     } = await res.json()
 
-    const legs = data.Legs ?? []
-    if (legs.length === 0) {
+    const route = data.Routes?.[0]
+    const legs = route?.Legs ?? []
+    if (!route || legs.length === 0) {
       return NextResponse.json({ error: 'No route found' }, { status: 404 })
     }
 
@@ -72,8 +76,9 @@ export async function POST(req: NextRequest) {
     }
 
     const geometry: GeoJSON.LineString = { type: 'LineString', coordinates: allCoords }
-    const distanceKm = data.Summary?.Distance ?? 0
-    const durationHours = (data.Summary?.DurationSeconds ?? 0) / 3600
+    // Routes v2 returns Distance in meters; UI expects kilometers.
+    const distanceKm = (route.Summary?.Distance ?? 0) / 1000
+    const durationHours = (route.Summary?.Duration ?? 0) / 3600
 
     return NextResponse.json({ geometry, distanceKm, durationHours })
   } catch (err) {

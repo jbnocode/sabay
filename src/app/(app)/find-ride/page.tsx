@@ -1,14 +1,15 @@
 'use client'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
-import { Clock, Car } from 'lucide-react'
+import { Clock, Car, MapPin } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatPHP } from '@/lib/utils'
 import type { LatLng } from '@/lib/matching/geometry'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import PlaceAutocomplete from '@/components/places/PlaceAutocomplete'
+import { FIND_RIDE_PREFILL_KEY } from '@/components/landing/LandingHero'
 
 const RouteMap = dynamic(() => import('@/components/map/RouteMap'), { ssr: false })
 
@@ -61,9 +62,46 @@ export default function FindRidePage() {
     setDropoffLabel(place.label)
   }, [])
 
+  useEffect(() => {
+    let raw: string | null = null
+    try {
+      raw = sessionStorage.getItem(FIND_RIDE_PREFILL_KEY)
+      if (raw) sessionStorage.removeItem(FIND_RIDE_PREFILL_KEY)
+    } catch {
+      return
+    }
+    if (!raw) return
+    try {
+      const p = JSON.parse(raw) as {
+        pickupLabel?: string
+        dropoffLabel?: string
+        pickup?: LatLng
+        dropoff?: LatLng
+        date?: string
+      }
+      if (typeof p.pickupLabel === 'string') setPickupLabel(p.pickupLabel)
+      if (typeof p.dropoffLabel === 'string') setDropoffLabel(p.dropoffLabel)
+      if (p.pickup != null && typeof p.pickup.lat === 'number' && typeof p.pickup.lng === 'number') {
+        setPickup({ lat: p.pickup.lat, lng: p.pickup.lng })
+      }
+      if (p.dropoff != null && typeof p.dropoff.lat === 'number' && typeof p.dropoff.lng === 'number') {
+        setDropoff({ lat: p.dropoff.lat, lng: p.dropoff.lng })
+      }
+      if (typeof p.date === 'string' && p.date) setDate(p.date)
+    } catch {
+      /* invalid JSON */
+    }
+  }, [])
+
+  const samePickupAndDropoff =
+    !!pickup &&
+    !!dropoff &&
+    Math.abs(pickup.lat - dropoff.lat) < 1e-5 &&
+    Math.abs(pickup.lng - dropoff.lng) < 1e-5
+
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault()
-    if (!pickup || !dropoff) return
+    if (!pickup || !dropoff || samePickupAndDropoff) return
     setLoading(true)
     setSearched(false)
     setSelectedRoute(null)
@@ -191,10 +229,15 @@ export default function FindRidePage() {
           </div>
         </div>
 
+        {samePickupAndDropoff && (
+          <p className="text-xs text-amber-700">
+            Choose two different places — pick-up must be before drop-off along the driver&apos;s route.
+          </p>
+        )}
         <Button
           type="submit"
           loading={loading}
-          disabled={!pickup || !dropoff}
+          disabled={!pickup || !dropoff || samePickupAndDropoff}
           className="w-full"
         >
           Search rides
@@ -212,37 +255,77 @@ export default function FindRidePage() {
           {results.map(r => (
             <div
               key={r.id}
-              onClick={() => setSelectedRoute(s => s?.id === r.id ? null : r)}
-              className={`bg-white rounded-2xl border p-4 cursor-pointer transition-all ${
+              className={`bg-white rounded-2xl border p-4 transition-all ${
                 selectedRoute?.id === r.id
                   ? 'border-emerald-400 ring-2 ring-emerald-100'
-                  : 'border-gray-100 hover:border-emerald-200'
+                  : 'border-gray-100'
               }`}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="space-y-1 flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900 truncate">{r.driver_name}</p>
-                  <p className="text-xs text-gray-500 truncate">
-                    {r.origin_label} → {r.destination_label}
-                  </p>
-                  <div className="flex flex-wrap gap-3 text-xs text-gray-400 mt-1">
-                    <span className="flex items-center gap-1">
-                      <Clock size={11} /> {r.departure_time?.slice(0, 5)}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Car size={11} /> {r.vehicle_type}
-                    </span>
-                    <span>{FREQ_LABELS[r.frequency] ?? r.frequency}</span>
-                    <span>{r.seats_available} seat{r.seats_available !== 1 ? 's' : ''} left</span>
+              <button
+                type="button"
+                onClick={() => setSelectedRoute(s => s?.id === r.id ? null : r)}
+                className={`w-full text-left rounded-xl -m-1 p-1 cursor-pointer transition-colors ${
+                  selectedRoute?.id === r.id ? '' : 'hover:bg-gray-50/80'
+                }`}
+              >
+                <div className="space-y-2 w-full">
+                  <div className="space-y-2">
+                    <p className="flex gap-2 items-start text-sm sm:text-[0.95rem] leading-snug font-medium text-gray-900">
+                      <span
+                        className="flex h-[11px] w-[11px] shrink-0 items-center justify-center text-red-600"
+                        aria-hidden
+                      >
+                        <MapPin className="block" size={11} strokeWidth={2.5} />
+                      </span>
+                      <span className="min-w-0 break-words">
+                        <span className="block text-[11px] font-semibold uppercase tracking-wide text-red-700 leading-none">
+                          Near pick-up
+                        </span>
+                        <span className="block mt-1">{r.origin_label}</span>
+                      </span>
+                    </p>
+                    <p className="flex gap-2 items-start text-sm sm:text-[0.95rem] leading-snug font-medium text-gray-900">
+                      <span
+                        className="flex h-[11px] w-[11px] shrink-0 items-center justify-center text-blue-600"
+                        aria-hidden
+                      >
+                        <MapPin className="block" size={11} strokeWidth={2.5} />
+                      </span>
+                      <span className="min-w-0 break-words">
+                        <span className="block text-[11px] font-semibold uppercase tracking-wide text-blue-800/90 leading-none">
+                          Near drop-off
+                        </span>
+                        <span className="block mt-1">{r.destination_label}</span>
+                      </span>
+                    </p>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <p className="text-xs text-gray-500">
+                        Driver: <span className="text-gray-700 font-medium">{r.driver_name}</span>
+                      </p>
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400">
+                        <span className="flex items-center gap-1">
+                          <Clock size={11} /> {r.departure_time?.slice(0, 5)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Car size={11} /> {r.vehicle_type}
+                        </span>
+                        <span>{FREQ_LABELS[r.frequency] ?? r.frequency}</span>
+                        <span>{r.seats_available} seat{r.seats_available !== 1 ? 's' : ''} left</span>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 self-start">
+                      <p className="text-lg font-extrabold text-emerald-600 leading-tight tabular-nums">
+                        {r.effective_fare_php ? formatPHP(r.effective_fare_php) : '—'}
+                      </p>
+                      <p className="text-[11px] text-gray-400 mt-0.5 leading-tight">
+                        per passenger seat
+                      </p>
+                    </div>
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-lg font-extrabold text-emerald-600">
-                    {r.effective_fare_php ? formatPHP(r.effective_fare_php) : '—'}
-                  </p>
-                  <p className="text-xs text-gray-400">per seat</p>
-                </div>
-              </div>
+              </button>
 
               {selectedRoute?.id === r.id && (
                 <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
@@ -250,8 +333,8 @@ export default function FindRidePage() {
                     Your pick-up and drop-off will be sent as a request for the driver to approve.
                   </p>
                   <Input
-                    label="Note to driver (optional)"
-                    placeholder="e.g. I'll be at the 7-Eleven corner"
+                    label="Note to driver"
+                    placeholder="Optional — e.g. I'll be at the 7-Eleven corner"
                     value={requestNote}
                     onChange={e => setRequestNote(e.target.value)}
                   />

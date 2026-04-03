@@ -1,104 +1,118 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Car, UserCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import type { AuthError } from '@supabase/supabase-js'
 import Button from '@/components/ui/Button'
-
-/** Must match `supabase/seed_demo_users.sql`. Optional: NEXT_PUBLIC_SABAY_DEMO_PASSWORD in .env.local */
-const DEMO_PASSWORD = process.env.NEXT_PUBLIC_SABAY_DEMO_PASSWORD ?? 'SabayDemo2026!'
-
-const DEMO_DRIVER_EMAIL = 'driver@demo.sabay.app'
-const DEMO_PASSENGER_EMAIL = 'passenger@demo.sabay.app'
+import Input from '@/components/ui/Input'
+import PasswordInput from '@/components/ui/PasswordInput'
 
 export default function SignInPage() {
-  const [driverLoading, setDriverLoading] = useState(false)
-  const [passengerLoading, setPassengerLoading] = useState(false)
+  const [identifier, setIdentifier] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [errorHint, setErrorHint] = useState('')
   const router = useRouter()
-  const supabase = createClient()
 
-  async function signInDemo(
-    email: string,
-    setBusy: (v: boolean) => void
-  ) {
+  useEffect(() => {
+    const sb = createClient()
+    sb.auth.getSession().then(({ data: { session } }) => {
+      if (session) router.replace('/')
+    })
+  }, [router])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
     setError('')
     setErrorHint('')
-    setBusy(true)
-    const { error: err } = await supabase.auth.signInWithPassword({
-      email,
-      password: DEMO_PASSWORD,
-    })
-    setBusy(false)
-    if (err) {
-      const ae = err as AuthError
-      const status = typeof ae.status === 'number' ? ae.status : undefined
-      setError(err.message || 'Sign-in failed')
-      // 500 from Supabase Auth is not the same as 401 "Invalid API key" (that was the seed script).
-      if (status === 500 || /internal server error|500/i.test(err.message)) {
-        setErrorHint(
-          'Supabase Auth returned a server error. Check Dashboard → Logs → Auth for the stack trace. Typical fixes: enable Email provider with password (Authentication → Providers → Email), confirm demo users exist (run seed_demo_users.sql), and ensure NEXT_PUBLIC_SABAY_DEMO_PASSWORD matches the seeded password if you changed it.'
-        )
-      } else if (/invalid login|invalid credentials|email not confirmed/i.test(err.message)) {
-        setErrorHint(
-          'Wrong password or email not confirmed. Default demo password is SabayDemo2026! unless you set NEXT_PUBLIC_SABAY_DEMO_PASSWORD.'
-        )
-      }
+    const idTrim = identifier.trim()
+    if (!idTrim) {
+      setError('Enter your email or username.')
       return
     }
-    router.push('/find-ride')
+    if (!password) {
+      setError('Enter your password.')
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/sign-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: idTrim, password }),
+        credentials: 'same-origin',
+      })
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+      if (!res.ok) {
+        setLoading(false)
+        setError(body.error || 'Sign-in failed')
+        if (res.status === 401) {
+          setErrorHint(
+            'Check your password. If you just signed up, confirm your email first if your project requires it.',
+          )
+        }
+        return
+      }
+    } catch {
+      setLoading(false)
+      setError('Network error. Try again.')
+      return
+    }
+    setLoading(false)
+    router.push('/')
     router.refresh()
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-6 bg-gray-50">
-      <div className="max-w-sm w-full space-y-6">
-        <div className="text-center space-y-1">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-6">
+      <div className="w-full max-w-sm space-y-6">
+        <div className="space-y-1 text-center">
           <Link href="/" className="text-2xl font-extrabold text-emerald-600">
             Sabay
           </Link>
-          <p className="text-gray-500 text-sm">Demo sign-in (MVP)</p>
+          <p className="text-sm text-gray-500">One account — post a ride or find one</p>
         </div>
 
-        <div className="space-y-3">
-          <p className="text-sm font-medium text-gray-700 text-center">
-            Log in as a demo user
-          </p>
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
           {error ? (
-            <div className="text-left space-y-2 bg-red-50 rounded-xl px-3 py-2 border border-red-100">
-              <p className="text-sm text-red-700 font-medium">{error}</p>
-              {errorHint ? (
-                <p className="text-xs text-red-600/90 leading-relaxed">{errorHint}</p>
-              ) : null}
+            <div className="space-y-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-left">
+              <p className="text-sm font-medium text-red-700">{error}</p>
+              {errorHint ? <p className="text-xs leading-relaxed text-red-600/90">{errorHint}</p> : null}
             </div>
           ) : null}
-          <Button
-            type="button"
-            className="w-full justify-center gap-2"
-            size="lg"
-            loading={driverLoading}
-            disabled={passengerLoading}
-            onClick={() => signInDemo(DEMO_DRIVER_EMAIL, setDriverLoading)}
-          >
-            <Car size={20} strokeWidth={1.8} />
-            Log in as driver
+
+          <Input
+            label="Email or username"
+            name="username"
+            autoComplete="username"
+            value={identifier}
+            onChange={e => setIdentifier(e.target.value)}
+            placeholder="you@example.com or your handle"
+            required
+          />
+
+          <PasswordInput
+            label="Password"
+            name="current-password"
+            autoComplete="current-password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Your password"
+            required
+          />
+
+          <Button type="submit" className="w-full justify-center" size="lg" loading={loading}>
+            Post or find a ride now
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full justify-center gap-2"
-            size="lg"
-            loading={passengerLoading}
-            disabled={driverLoading}
-            onClick={() => signInDemo(DEMO_PASSENGER_EMAIL, setPassengerLoading)}
-          >
-            <UserCircle size={20} strokeWidth={1.8} />
-            Log in as passenger
-          </Button>
-        </div>
+
+          <p className="text-center text-xs text-gray-500">
+            New here?{' '}
+            <Link href="/sign-up" className="font-medium text-emerald-600 hover:text-emerald-700">
+              Sign up
+            </Link>
+          </p>
+        </form>
 
         <p className="text-center text-xs text-gray-400">
           By continuing you agree to our{' '}

@@ -8,9 +8,12 @@ export type BookingStatus = 'confirmed' | 'in_progress' | 'completed' | 'cancell
 export interface UserProfile {
   id: string
   display_name: string | null
+  username: string | null
   phone: string | null
   phone_verified: boolean
   avatar_url: string | null
+  driver_rating_avg: number | null
+  passenger_rating_avg: number | null
   role: UserRole
   created_at: string
   updated_at: string
@@ -35,7 +38,9 @@ export interface DriverRoute {
   custom_days: number[] | null
   departure_time: string
   first_departure_date: string
+  last_departure_date: string | null
   timezone: string
+  passenger_note: string | null
   origin_label: string | null
   destination_label: string | null
   route_geojson: GeoJSON.LineString | null
@@ -83,6 +88,16 @@ export interface RideBooking {
   currency: string
   status: BookingStatus
   created_at: string
+}
+
+/** Trip group chat message (one thread per driver_route). */
+export interface RideThreadMessage {
+  id: string
+  driver_route_id: string
+  sender_id: string
+  body: string
+  created_at: string
+  sender?: Pick<UserProfile, 'display_name'>
 }
 
 export interface FareInputs {

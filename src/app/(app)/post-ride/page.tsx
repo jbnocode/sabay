@@ -1,12 +1,12 @@
 'use client'
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { calculateFare, isFareOverrideWarning, FARE_MIN_PHP } from '@/lib/fare/calculator'
 import { formatPHP } from '@/lib/utils'
 import type { LatLng } from '@/lib/matching/geometry'
-import type { VehicleType, RouteFrequency } from '@/types/database'
+import type { DriverRoute, VehicleType } from '@/types/database'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import PlaceAutocomplete from '@/components/places/PlaceAutocomplete'
@@ -15,24 +15,22 @@ const RouteMap = dynamic(() => import('@/components/map/RouteMap'), { ssr: false
 
 const SEARCH_BIAS: { lng: number; lat: number } = { lng: 121.0244, lat: 14.5547 }
 
-type PickingMode = 'origin' | 'destination' | null
-
 const VEHICLE_TYPES: { value: VehicleType; label: string; efficiency: string }[] = [
   { value: 'hatchback', label: 'Hatchback', efficiency: '12 km/L' },
   { value: 'sedan', label: 'Sedan', efficiency: '10 km/L' },
   { value: 'suv', label: 'SUV', efficiency: '8 km/L' },
 ]
 
-const FREQUENCIES: { value: RouteFrequency; label: string }[] = [
-  { value: 'once', label: 'One-time' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekdays', label: 'Weekdays (M–F)' },
-  { value: 'mwf', label: 'Mon / Wed / Fri' },
-]
-
 export default function PostRidePage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+  const editParam = searchParams.get('edit')?.trim() ?? ''
+
+  const [editingRouteId, setEditingRouteId] = useState<string | null>(null)
+  const skipNextDepartureDayAuto = useRef(false)
+
+  const [userLoc, setUserLoc] = useState<LatLng | null>(null)
 
   const [origin, setOrigin] = useState<LatLng | null>(null)
   const [destination, setDestination] = useState<LatLng | null>(null)
@@ -41,22 +39,24 @@ export default function PostRidePage() {
   const [routeGeoJson, setRouteGeoJson] = useState<GeoJSON.LineString | null>(null)
   const [distanceKm, setDistanceKm] = useState(0)
   const [durationHours, setDurationHours] = useState(0)
-  const [picking, setPicking] = useState<PickingMode>(null)
   const [routeLoading, setRouteLoading] = useState(false)
 
   const [departureTime, setDepartureTime] = useState('07:30')
   const [departureDate, setDepartureDate] = useState('')
-  const [frequency, setFrequency] = useState<RouteFrequency>('weekdays')
+  // 0=Sun … 6=Sat
+  const [customDays, setCustomDays] = useState<number[]>([1, 2, 3, 4, 5])
 
   const [vehicleType, setVehicleType] = useState<VehicleType>('sedan')
   const [gasPrice, setGasPrice] = useState(62)
   const [seats, setSeats] = useState(3)
   const [overrideFare, setOverrideFare] = useState<string>('')
+  const [passengerNote, setPassengerNote] = useState('')
   const [plateTag, setPlateTag] = useState('')
 
+  const pricingSeats = 1
   const fareBreakdown =
     distanceKm > 0
-      ? calculateFare({ vehicleType, gasPricePHP: gasPrice, distanceKm, durationHours, seats })
+      ? calculateFare({ vehicleType, gasPricePHP: gasPrice, distanceKm, durationHours, seats: pricingSeats })
       : null
 
   const computedFare = fareBreakdown?.roundedPerSeatPHP ?? 0
@@ -65,8 +65,8 @@ export default function PostRidePage() {
   const showOverrideWarning =
     overrideFareNum !== null && computedFare > 0 && isFareOverrideWarning(computedFare, overrideFareNum)
   const overrideError =
-    overrideFareNum !== null && overrideFareNum < FARE_MIN_PHP
-      ? `Minimum fare is ₱${FARE_MIN_PHP}`
+    overrideFareNum !== null && overrideFareNum < 0
+      ? `Fare can't be negative`
       : undefined
 
   const [saving, setSaving] = useState(false)
@@ -93,6 +93,84 @@ export default function PostRidePage() {
   }, [])
 
   useEffect(() => {
+    if (!editParam) {
+      setEditingRouteId(null)
+      return
+    }
+    let cancelled = false
+    const sb = createClient()
+    ;(async () => {
+      const { data: auth } = await sb.auth.getUser()
+      const user = auth?.user
+      if (!user) return
+      const { data, error } = await sb.from('driver_routes').select('*').eq('id', editParam).maybeSingle()
+      if (cancelled || error || !data) return
+      const row = data as DriverRoute
+      if (row.driver_id !== user.id) return
+      skipNextDepartureDayAuto.current = true
+      setEditingRouteId(row.id)
+      setOriginLabel(row.origin_label ?? '')
+      setDestinationLabel(row.destination_label ?? '')
+      const gj = row.route_geojson
+      if (
+        gj &&
+        typeof gj === 'object' &&
+        'type' in gj &&
+        gj.type === 'LineString' &&
+        'coordinates' in gj &&
+        Array.isArray(gj.coordinates) &&
+        gj.coordinates.length >= 2
+      ) {
+        const coords = gj.coordinates as number[][]
+        const first = coords[0]
+        const last = coords[coords.length - 1]
+        if (first?.length >= 2 && last?.length >= 2) {
+          setOrigin({ lng: first[0], lat: first[1] })
+          setDestination({ lng: last[0], lat: last[1] })
+        }
+      }
+      const t = row.departure_time
+      setDepartureTime(typeof t === 'string' && t.length >= 5 ? t.slice(0, 5) : '07:30')
+      setDepartureDate(row.first_departure_date ?? '')
+      const days = row.custom_days
+      setCustomDays(Array.isArray(days) && days.length > 0 ? [...days] : [1, 2, 3, 4, 5])
+      if (row.vehicle_type) setVehicleType(row.vehicle_type)
+      if (row.gas_price_php_per_l != null) setGasPrice(Number(row.gas_price_php_per_l))
+      if (row.seats_available != null) setSeats(row.seats_available)
+      setPassengerNote(row.passenger_note ?? '')
+      setOverrideFare(row.override_fare_php != null ? String(row.override_fare_php) : '')
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [editParam])
+
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLoc({ lng: pos.coords.longitude, lat: pos.coords.latitude })
+      },
+      () => {
+        // Ignore (permission denied / unavailable); keep Metro Manila bias.
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 }
+    )
+  }, [])
+
+  // Auto-pick the weekday that matches the selected first date.
+  useEffect(() => {
+    if (!departureDate) return
+    if (skipNextDepartureDayAuto.current) {
+      skipNextDepartureDayAuto.current = false
+      return
+    }
+    const d = new Date(`${departureDate}T00:00:00`)
+    if (Number.isNaN(d.getTime())) return
+    setCustomDays([d.getDay()])
+  }, [departureDate])
+
+  useEffect(() => {
     if (!origin || !destination) {
       setRouteGeoJson(null)
       setDistanceKm(0)
@@ -102,20 +180,17 @@ export default function PostRidePage() {
     void fetchRoute(origin, destination)
   }, [origin, destination, fetchRoute])
 
-  const handleMapClick = useCallback(
-    (lngLat: LatLng) => {
-      if (!picking) return
-      if (picking === 'origin') {
-        setOrigin(lngLat)
-        setOriginLabel(`${lngLat.lat.toFixed(5)}, ${lngLat.lng.toFixed(5)}`)
-      } else {
-        setDestination(lngLat)
-        setDestinationLabel(`${lngLat.lat.toFixed(5)}, ${lngLat.lng.toFixed(5)}`)
-      }
-      setPicking(null)
-    },
-    [picking]
-  )
+  const mapRouteGeoJson: GeoJSON.LineString | null =
+    routeGeoJson ??
+    (origin && destination
+      ? {
+          type: 'LineString',
+          coordinates: [
+            [origin.lng, origin.lat],
+            [destination.lng, destination.lat],
+          ],
+        }
+      : null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -128,12 +203,13 @@ export default function PostRidePage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/sign-in'); return }
 
-    const { error } = await supabase.from('driver_routes').insert({
-      driver_id: user.id,
-      status: 'active',
-      frequency,
+    const payload = {
+      status: 'active' as const,
+      frequency: 'custom' as const,
+      custom_days: customDays,
       departure_time: departureTime,
       first_departure_date: departureDate,
+      passenger_note: passengerNote || null,
       origin_label: originLabel,
       destination_label: destinationLabel,
       origin_geom: `POINT(${origin.lng} ${origin.lat})`,
@@ -146,24 +222,32 @@ export default function PostRidePage() {
       computed_fare_php: computedFare || null,
       override_fare_php: overrideFareNum,
       seats_available: seats,
-    })
+    }
+
+    const { error } = editingRouteId
+      ? await supabase.from('driver_routes').update(payload).eq('id', editingRouteId)
+      : await supabase.from('driver_routes').insert({
+          driver_id: user.id,
+          ...payload,
+        })
     setSaving(false)
 
     if (error) { setSaveError(error.message); return }
-    router.push('/inbox')
+    router.push(editingRouteId ? '/profile' : '/requests')
   }
 
   return (
     <div className="space-y-6 pb-12">
       <div>
-        <h1 className="text-2xl font-extrabold text-gray-900">Post a Ride</h1>
+        <h1 className="text-2xl font-extrabold text-gray-900">{editingRouteId ? 'Edit ride' : 'Post a Ride'}</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Search start and end, then set your schedule (GrabMaps when configured in AWS).
+          {editingRouteId
+            ? 'Update route, schedule, or fare — then save changes.'
+            : 'Search start and end, then set your schedule.'}
         </p>
       </div>
 
       <div className="space-y-3">
-        <p className="text-sm font-semibold text-gray-700">1. Route</p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <PlaceAutocomplete
             label="Start location"
@@ -177,7 +261,7 @@ export default function PostRidePage() {
               setOrigin({ lat: p.lat, lng: p.lng })
               setOriginLabel(p.label)
             }}
-            bias={SEARCH_BIAS}
+            bias={userLoc ?? SEARCH_BIAS}
           />
           <PlaceAutocomplete
             label="End location"
@@ -191,36 +275,19 @@ export default function PostRidePage() {
               setDestination({ lat: p.lat, lng: p.lng })
               setDestinationLabel(p.label)
             }}
-            bias={SEARCH_BIAS}
+            bias={userLoc ?? SEARCH_BIAS}
           />
         </div>
 
-        <p className="text-xs text-gray-500">
-          Or set a point on the map:
-          <button
-            type="button"
-            className={`ml-2 font-medium underline-offset-2 hover:underline ${picking === 'origin' ? 'text-emerald-700' : 'text-gray-700'}`}
-            onClick={() => setPicking(p => p === 'origin' ? null : 'origin')}
-          >
-            {origin ? 'Adjust start on map' : 'Choose start on map'}
-          </button>
-          <span className="mx-1 text-gray-300">·</span>
-          <button
-            type="button"
-            className={`font-medium underline-offset-2 hover:underline ${picking === 'destination' ? 'text-emerald-700' : 'text-gray-700'}`}
-            onClick={() => setPicking(p => p === 'destination' ? null : 'destination')}
-          >
-            {destination ? 'Adjust end on map' : 'Choose end on map'}
-          </button>
-          {routeLoading && <span className="ml-2 text-emerald-600 animate-pulse">Getting route…</span>}
-        </p>
+        {routeLoading && (
+          <p className="text-xs text-emerald-700 animate-pulse">Getting route…</p>
+        )}
 
         <RouteMap
           origin={origin}
           destination={destination}
-          routeGeoJson={routeGeoJson}
-          onMapClick={handleMapClick}
-          picking={picking}
+          routeGeoJson={mapRouteGeoJson}
+          initialCenter={userLoc}
           className="h-64 w-full rounded-2xl overflow-hidden border border-gray-200"
         />
 
@@ -234,7 +301,6 @@ export default function PostRidePage() {
       <hr className="border-gray-100" />
 
       <form onSubmit={handleSubmit} className="space-y-5">
-        <p className="text-sm font-semibold text-gray-700">2. Schedule</p>
         <div className="grid grid-cols-2 gap-3">
           <Input
             label="Departure time"
@@ -251,26 +317,48 @@ export default function PostRidePage() {
         </div>
         <div>
           <p className="text-sm font-medium text-gray-700 mb-2">Frequency</p>
-          <div className="grid grid-cols-2 gap-2">
-            {FREQUENCIES.map(f => (
-              <label key={f.value} className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="frequency"
-                  value={f.value}
-                  checked={frequency === f.value}
-                  onChange={() => setFrequency(f.value)}
-                  className="accent-emerald-600"
-                />
-                <span className="text-sm text-gray-700">{f.label}</span>
-              </label>
-            ))}
+          <div className="grid grid-cols-7 gap-2">
+            {([
+              { n: 1, label: 'Mon' },
+              { n: 2, label: 'Tue' },
+              { n: 3, label: 'Wed' },
+              { n: 4, label: 'Thu' },
+              { n: 5, label: 'Fri' },
+              { n: 6, label: 'Sat' },
+              { n: 0, label: 'Sun' },
+            ] as const).map((d) => {
+              const active = customDays.includes(d.n)
+              return (
+                <button
+                  key={d.n}
+                  type="button"
+                  onClick={() =>
+                    setCustomDays((prev) => {
+                      const next = prev.includes(d.n)
+                        ? prev.filter((x) => x !== d.n)
+                        : [...prev, d.n]
+                      next.sort((a, b) => a - b)
+                      return next
+                    })
+                  }
+                  className={`h-10 w-full rounded-xl border text-xs font-semibold transition-colors ${
+                    active
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {d.label}
+                </button>
+              )
+            })}
           </div>
+          {customDays.length === 0 && (
+            <p className="mt-2 text-xs text-red-600">Pick at least one day.</p>
+          )}
         </div>
 
         <hr className="border-gray-100" />
 
-        <p className="text-sm font-semibold text-gray-700">3. Vehicle</p>
         <div>
           <p className="text-sm font-medium text-gray-700 mb-2">Vehicle type</p>
           <div className="grid grid-cols-3 gap-2">
@@ -312,7 +400,6 @@ export default function PostRidePage() {
 
         <hr className="border-gray-100" />
 
-        <p className="text-sm font-semibold text-gray-700">4. Fare per seat</p>
         <Input
           label="Current gas price (₱/L)"
           type="number"
@@ -320,9 +407,13 @@ export default function PostRidePage() {
           step={0.5}
           value={gasPrice}
           onChange={e => setGasPrice(parseFloat(e.target.value) || 62)}
-          hint="Check DOE weekly bulletin or your last fill-up receipt"
         />
 
+        {!fareBreakdown && (
+          <p className="text-xs text-gray-500">
+            Set start and end location to see the fare breakdown.
+          </p>
+        )}
         {fareBreakdown && (
           <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1 border border-gray-100">
             <p className="font-semibold text-gray-700 mb-2">Fare breakdown</p>
@@ -336,22 +427,33 @@ export default function PostRidePage() {
               <span>× maintenance factor</span><span>1.1×</span>
             </div>
             <div className="border-t border-gray-200 pt-2 mt-1 flex justify-between font-bold text-gray-800">
-              <span>Suggested per seat</span><span>{formatPHP(fareBreakdown.roundedPerSeatPHP)}</span>
+              <span>Suggested fare (per passenger)</span><span>{formatPHP(fareBreakdown.roundedPerSeatPHP)}</span>
             </div>
           </div>
         )}
 
         <Input
-          label="Override fare per seat (₱) — optional"
+          label="Override fare (₱) — optional"
           type="number"
-          min={FARE_MIN_PHP}
+          min={0}
           step={5}
           placeholder={computedFare > 0 ? `Suggested: ₱${computedFare}` : 'e.g. 150'}
           value={overrideFare}
           onChange={e => setOverrideFare(e.target.value)}
-          hint="Leave blank to use the suggested fare"
+          hint="Leave blank to use the suggested fare. Set to 0 for a free ride."
           error={overrideError}
         />
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700">Note to passengers (optional)</label>
+          <textarea
+            value={passengerNote}
+            onChange={(e) => setPassengerNote(e.target.value)}
+            rows={3}
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-base text-gray-900 placeholder:text-gray-400 transition-colors focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+            placeholder="e.g. Working in BGC everyday · Meet-up point details · Toll sharing"
+          />
+          <p className="text-xs text-gray-500">Shown to passengers when they view your ride.</p>
+        </div>
 
         {showOverrideWarning && (
           <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-lg border border-amber-200">
@@ -369,7 +471,7 @@ export default function PostRidePage() {
         {saveError && <p className="text-sm text-red-500">{saveError}</p>}
 
         <Button type="submit" loading={saving} className="w-full" size="lg">
-          Publish Ride
+          {editingRouteId ? 'Save changes' : 'Publish Ride'}
         </Button>
       </form>
     </div>

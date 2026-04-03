@@ -83,6 +83,8 @@ interface Props {
   destination?: LatLng | null
   pickupPoint?: LatLng | null
   dropoffPoint?: LatLng | null
+  /** Initial center before any route/markers exist. */
+  initialCenter?: LatLng | null
   onMapClick?: (lngLat: LatLng) => void
   picking?: 'origin' | 'destination' | 'pickup' | 'dropoff' | null
   className?: string
@@ -93,8 +95,8 @@ type MarkerKey = 'origin' | 'destination' | 'pickup' | 'dropoff'
 const MARKER_CONFIG: Record<MarkerKey, { color: string; label: string }> = {
   origin:      { color: '#059669', label: 'Start' },
   destination: { color: '#dc2626', label: 'End' },
-  pickup:      { color: '#2563eb', label: 'Pick-up' },
-  dropoff:     { color: '#7c3aed', label: 'Drop-off' },
+  pickup:      { color: '#dc2626', label: 'Pick-up' },
+  dropoff:     { color: '#2563eb', label: 'Drop-off' },
 }
 
 export default function RouteMap({
@@ -103,6 +105,7 @@ export default function RouteMap({
   destination,
   pickupPoint,
   dropoffPoint,
+  initialCenter,
   onMapClick,
   picking,
   className = 'h-64 w-full rounded-2xl overflow-hidden',
@@ -125,6 +128,11 @@ export default function RouteMap({
       const existing = markersRef.current[key]
       if (existing) {
         existing.setLngLat(lngLat)
+        const pill = existing.getElement()?.firstElementChild as HTMLElement | null
+        if (pill) {
+          pill.style.background = color
+          pill.textContent = label
+        }
         return
       }
       const el = document.createElement('div')
@@ -156,10 +164,15 @@ export default function RouteMap({
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
 
+    const initialCenterLngLat: [number, number] =
+      initialCenter && Number.isFinite(initialCenter.lng) && Number.isFinite(initialCenter.lat)
+        ? [initialCenter.lng, initialCenter.lat]
+        : MANILA_CENTER
+
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: initialStyle.styleUrl,
-      center: MANILA_CENTER,
+      center: initialCenterLngLat,
       zoom: 11,
     })
 

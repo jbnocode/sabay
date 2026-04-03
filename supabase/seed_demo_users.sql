@@ -59,7 +59,7 @@ begin
       '',
       '',
       '{"provider":"email","providers":["email"]}'::jsonb,
-      '{"display_name":"Demo Driver","role":"driver"}'::jsonb,
+      '{"display_name":"Demo Driver","role":"both","username":"demo_driver"}'::jsonb,
       now(),
       now()
     );
@@ -87,11 +87,12 @@ begin
     select id into v_driver_id from auth.users where email = 'driver@demo.sabay.app' limit 1;
   end if;
 
-  insert into public.users (id, display_name, role)
-  values (v_driver_id, 'Demo Driver', 'driver')
+  insert into public.users (id, display_name, role, username)
+  values (v_driver_id, 'Demo Driver', 'both', 'demo_driver')
   on conflict (id) do update set
     display_name = excluded.display_name,
-    role = excluded.role;
+    role = excluded.role,
+    username = excluded.username;
 
   insert into public.vehicles (user_id, type, make_model, plate_suffix, seats_offered)
   select v_driver_id, 'sedan', 'Demo Sedan', 'D01', 3
@@ -129,7 +130,7 @@ begin
       '',
       '',
       '{"provider":"email","providers":["email"]}'::jsonb,
-      '{"display_name":"Demo Passenger","role":"passenger"}'::jsonb,
+      '{"display_name":"Demo Passenger","role":"both","username":"demo_passenger"}'::jsonb,
       now(),
       now()
     );
@@ -157,11 +158,12 @@ begin
     select id into v_pass_id from auth.users where email = 'passenger@demo.sabay.app' limit 1;
   end if;
 
-  insert into public.users (id, display_name, role)
-  values (v_pass_id, 'Demo Passenger', 'passenger')
+  insert into public.users (id, display_name, role, username)
+  values (v_pass_id, 'Demo Passenger', 'both', 'demo_passenger')
   on conflict (id) do update set
     display_name = excluded.display_name,
-    role = excluded.role;
+    role = excluded.role,
+    username = excluded.username;
 
   -- Repair demo rows created by older seeds: GoTrue cannot scan NULL token columns
   update auth.users set confirmation_token = '' where email in ('driver@demo.sabay.app', 'passenger@demo.sabay.app') and confirmation_token is null;
