@@ -16,6 +16,14 @@ const RouteMap = dynamic(() => import('@/components/map/RouteMap'), { ssr: false
 /** Bias place search toward Metro Manila ([lng, lat]). */
 const SEARCH_BIAS: { lng: number; lat: number } = { lng: 121.0244, lat: 14.5547 }
 
+/** Corridor width for matching pick-up / drop-off to a route (500 m steps, up to 5 km). */
+const RADIUS_OPTIONS_METERS = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000] as const
+
+function formatRadiusLabel(meters: number): string {
+  if (meters < 1000) return `${meters} m`
+  return `${meters / 1000} km`
+}
+
 interface RouteResult {
   id: string
   driver_name: string
@@ -219,12 +227,14 @@ export default function FindRidePage() {
             <label className="text-sm font-medium text-gray-700">Search radius</label>
             <select
               value={radius}
-              onChange={e => setRadius(parseInt(e.target.value))}
+              onChange={e => setRadius(parseInt(e.target.value, 10))}
               className="h-11 rounded-xl border border-gray-200 bg-white px-3 text-base text-gray-900 focus:border-emerald-500 focus:outline-none"
             >
-              <option value={500}>500 m</option>
-              <option value={1000}>1 km</option>
-              <option value={1500}>1.5 km</option>
+              {RADIUS_OPTIONS_METERS.map(m => (
+                <option key={m} value={m}>
+                  {formatRadiusLabel(m)}
+                </option>
+              ))}
             </select>
           </div>
         </div>

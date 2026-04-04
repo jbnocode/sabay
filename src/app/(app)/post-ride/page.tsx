@@ -53,10 +53,15 @@ export default function PostRidePage() {
   const [passengerNote, setPassengerNote] = useState('')
   const [plateTag, setPlateTag] = useState('')
 
-  const pricingSeats = 1
   const fareBreakdown =
     distanceKm > 0
-      ? calculateFare({ vehicleType, gasPricePHP: gasPrice, distanceKm, durationHours, seats: pricingSeats })
+      ? calculateFare({
+          vehicleType,
+          gasPricePHP: gasPrice,
+          distanceKm,
+          durationHours,
+          seats: Math.max(1, seats),
+        })
       : null
 
   const computedFare = fareBreakdown?.roundedPerSeatPHP ?? 0
@@ -222,6 +227,7 @@ export default function PostRidePage() {
       computed_fare_php: computedFare || null,
       override_fare_php: overrideFareNum,
       seats_available: seats,
+      fare_formula_version: 'v2',
     }
 
     const { error } = editingRouteId
