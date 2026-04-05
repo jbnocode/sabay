@@ -1,5 +1,8 @@
 -- =============================================================================
 -- Demo users: driver + passenger (run in Supabase → SQL Editor)
+--
+-- For a richer demo (rides, requests, inbox chats with demo@sabay.app and
+-- sample@gmail.com), also run seed_dashboard_demo.sql after this file.
 -- =============================================================================
 -- Password for BOTH accounts: SabayDemo2026!
 --

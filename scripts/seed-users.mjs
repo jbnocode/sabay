@@ -2,6 +2,7 @@
 /**
  * Optional: create demo driver + passenger via Supabase Auth Admin API.
  * Prefer running supabase/seed_demo_users.sql in the SQL Editor (no API key issues).
+ * For rides/requests/inbox demo data, run supabase/seed_dashboard_demo.sql as well.
  *
  * Requires in .env.local:
  *   NEXT_PUBLIC_SUPABASE_URL

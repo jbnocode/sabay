@@ -7,10 +7,14 @@ import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import PasswordInput from '@/components/ui/PasswordInput'
 
+const showDemoSignIn =
+  process.env.NEXT_PUBLIC_ENABLE_DEMO_SIGNIN === 'true' || process.env.NODE_ENV === 'development'
+
 export default function SignInPage() {
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [demoLoading, setDemoLoading] = useState(false)
   const [error, setError] = useState('')
   const [errorHint, setErrorHint] = useState('')
   const router = useRouter()
@@ -64,6 +68,34 @@ export default function SignInPage() {
     router.refresh()
   }
 
+  async function handleDemoSignIn() {
+    setError('')
+    setErrorHint('')
+    setDemoLoading(true)
+    try {
+      const res = await fetch('/api/auth/demo-sign-in', {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+      if (!res.ok) {
+        setDemoLoading(false)
+        setError(body.error || 'Demo sign-in failed')
+        if (res.status === 503) {
+          setErrorHint('Add DEMO_SIGNIN_PASSWORD to your server environment (e.g. .env.local).')
+        }
+        return
+      }
+    } catch {
+      setDemoLoading(false)
+      setError('Network error. Try again.')
+      return
+    }
+    setDemoLoading(false)
+    router.push('/')
+    router.refresh()
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-6">
       <div className="w-full max-w-sm space-y-6">
@@ -102,9 +134,38 @@ export default function SignInPage() {
             required
           />
 
-          <Button type="submit" className="w-full justify-center" size="lg" loading={loading}>
+          <Button
+            type="submit"
+            className="w-full justify-center"
+            size="lg"
+            loading={loading}
+            disabled={demoLoading}
+          >
             Post or find a ride now
           </Button>
+
+          {showDemoSignIn ? (
+            <div className="space-y-3">
+              <div className="relative flex items-center justify-center py-1">
+                <div className="absolute inset-x-0 top-1/2 h-px bg-gray-100" aria-hidden />
+                <span className="relative bg-white px-2 text-xs font-medium text-gray-400">or</span>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full justify-center"
+                size="lg"
+                loading={demoLoading}
+                disabled={loading}
+                onClick={() => void handleDemoSignIn()}
+              >
+                Log in with demo account
+              </Button>
+              <p className="text-center text-[11px] leading-snug text-gray-400">
+                Shared demo profile for trying Sabay — no signup needed.
+              </p>
+            </div>
+          ) : null}
 
           <p className="text-center text-xs text-gray-500">
             New here?{' '}
