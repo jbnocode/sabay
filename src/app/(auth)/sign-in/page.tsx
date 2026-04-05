@@ -92,7 +92,7 @@ export default function SignInPage() {
       return
     }
     setDemoLoading(false)
-    router.push('/')
+    router.push('/profile')
     router.refresh()
   }
 
